@@ -153,7 +153,7 @@ def list_files_in_remote_directory(server_url, username, password, remote_direct
         # Kombinierter Root-Pfad, den wir entfernen wollen
         base_server_url = server_url.split("/", 3)[:3]
         base_server_url = "/".join(base_server_url)
-        remote_root_path = f"{server_url.replace(base_server_url,'')}/{remote_directory_path.strip('/')}" # Quickfix weil das zurückgegebene XML Element https://jonycloud.dnd.homes schon entfernt hat.
+        remote_root_path = f"{server_url.replace(base_server_url,'')}/{remote_directory_path.strip('/')}" # Quickfix weil das zurückgegebene XML Element die Base Url schon entfernt hat.
 
         # Durchlaufen der XML-Elemente, um die Dateien und Verzeichnisse zu extrahieren
         for response_element in root.findall("{DAV:}response"):
