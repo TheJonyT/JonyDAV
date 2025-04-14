@@ -15,6 +15,7 @@ password = None
 
 remote_directory_path = None
 local_directory_path = None
+directory_pairs = []
 
 #------------------------------------------------------------------------------
 #                               Methoden
@@ -22,66 +23,62 @@ local_directory_path = None
 
 def read_config():
     """
-    Liest die Konfiguration aus der Datei 'jonydav.config' im Root-Verzeichnis des Skripts.
-    Falls die Datei nicht existiert, wird sie erstellt und mit Standard-Variablen und Anweisungen befüllt.
-    Die Werte werden als globale Variablen im Skript verfügbar gemacht.
+    Liest Konfiguration und Pfadpaare (lokal => remote) aus 'jonydav.config'.
     """
     config_filename = "jonydav.config"
-    
-    # Prüfen, ob die Konfigurationsdatei existiert
+
     if not os.path.exists(config_filename):
-        print("Konfigurationsdatei nicht gefunden. Erstelle eine neue jonydav.config Datei...")
-        
-        # Standard-Inhalt der neuen Konfigurationsdatei
+        print("Konfigurationsdatei nicht gefunden. Erstelle eine neue...")
         config_content = """# Konfiguration für Nextcloud WebDAV Zugriff
-# Geben Sie die vollständige URL Ihres Nextcloud-Servers an
 server_url = https://Ihr-Server/remote.php/dav/files/IhrBenutzername
-
-# Geben Sie Ihren Nextcloud-Benutzernamen an
 username = IhrBenutzername
-
-# Geben Sie Ihr Passwort an (Hinweis: In der Praxis sicherer Umgang empfohlen)
 password = IhrPasswort
 
-# Geben Sie den Remote-Stammverzeichnispfad an, relativ zur URL
-remote_directory_path = /Pfad/auf/dem/Server
-
-# Geben Sie das lokale Verzeichnis an, von dem Dateien hochgeladen werden sollen
-local_directory_path = /Pfad/zum/lokalen/Verzeichnis
+# Pfadpaare: lokale (absolut) => remote Pfade (relativ zu server_url)
+directory_pairs:
+C:/Lokaler/Ordner1 => /Remote/Ordner1
+C:/Lokaler/Ordner2 => /Remote/Ordner2
 """
-
-        # Erstellen und Schreiben der Konfigurationsdatei
-        with open(config_filename, "w") as config_file:
-            config_file.write(config_content)
-        
-        print(f"Die Konfigurationsdatei '{config_filename}' wurde erstellt. Bitte füllen Sie die Werte aus und starten Sie das Skript erneut.")
+        with open(config_filename, "w") as f:
+            f.write(config_content)
+        print("Bitte Konfigurationsdatei ausfüllen und Skript neu starten.")
         sys.exit()
-        
 
-    # Konfigurationsdatei existiert, nun die Werte einlesen
-    global server_url, username, password, remote_directory_path, local_directory_path
+    global server_url, username, password, directory_pairs
+    directory_pairs = []
 
     try:
-        with open(config_filename, "r") as config_file:
-            for line in config_file:
+        with open(config_filename, "r") as f:
+            in_pair_block = False
+            for line in f:
                 line = line.strip()
-                if line and not line.startswith("#"):  # Leerzeilen und Kommentare überspringen
+                if not line or line.startswith("#"):
+                    continue
+
+                if in_pair_block:
+                    if "=" in line and not "=>" in line:
+                        in_pair_block = False
+                    elif "=>" in line:
+                        local, remote = line.split("=>", 1)
+                        directory_pairs.append((local.strip(), remote.strip()))
+                        continue
+
+                if line.startswith("directory_pairs:"):
+                    in_pair_block = True
+                    continue
+
+                if "=" in line:
                     key, value = line.split("=", 1)
                     key = key.strip()
                     value = value.strip()
 
-                    # Setze die Werte der Variablen
                     if key == "server_url":
                         server_url = value
                     elif key == "username":
                         username = value
                     elif key == "password":
                         password = value
-                    elif key == "remote_directory_path":
-                        remote_directory_path = value
-                    elif key == "local_directory_path":
-                        local_directory_path = value
-        
+
         print("Konfiguration erfolgreich geladen.")
 
     except Exception as e:
@@ -247,7 +244,7 @@ def compare_remote_and_local_directories(local_list, remote_list):
 
     return missing_folders, missing_files
 
-def create_missing_folders(server_url, username, password, missing_folders_list):
+def create_missing_folders(server_url, username, password, remote_directory_path, missing_folders_list):
     """
     Erstellt die fehlenden Verzeichnisse auf dem Nextcloud-Server basierend auf der missing_folders_list.
 
@@ -255,6 +252,7 @@ def create_missing_folders(server_url, username, password, missing_folders_list)
         server_url (str): Die URL des Nextcloud-Servers (Basis-URL).
         username (str): Der Benutzername für die Authentifizierung.
         password (str): Das Passwort für die Authentifizierung.
+        remote_directory_path (str): Der Remote-Stammverzeichnispfad.
         missing_folders_list (list): Eine Liste von Verzeichnissen, die erstellt werden müssen (relative Pfade).
     """
     for folder in missing_folders_list:
@@ -280,7 +278,7 @@ def create_missing_folders(server_url, username, password, missing_folders_list)
         except requests.exceptions.RequestException as e:
             print(f"Ein Fehler ist beim Erstellen des Verzeichnisses {folder} aufgetreten: {e}")
 
-def upload_missing_files(server_url, username, password, local_directory_path, missing_files_list):
+def upload_missing_files(server_url, username, password, local_directory_path, remote_directory_path, missing_files_list):
     """
     Lädt fehlende Dateien auf den Nextcloud-Server basierend auf der missing_files_list hoch.
     Dateien werden in den richtigen Verzeichnissen abgelegt, die Uploads erfolgen nacheinander.
@@ -290,6 +288,7 @@ def upload_missing_files(server_url, username, password, local_directory_path, m
         username (str): Der Benutzername für die Authentifizierung.
         password (str): Das Passwort für die Authentifizierung.
         local_directory_path (str): Der lokale Pfad des Verzeichnisses, in dem sich die Dateien befinden.
+        remote_directory_path (str): Der Remote-Stammverzeichnispfad.
         missing_files_list (list): Eine Liste von Dateien (mit Pfaden), die hochgeladen werden müssen (relative Pfade).
     """
     uploaded_files_count = 0
@@ -316,7 +315,6 @@ def upload_missing_files(server_url, username, password, local_directory_path, m
             # Prüfen, ob der Upload erfolgreich war (Statuscode 201 = Created)
             if response.status_code == 201:
                 print(f"Datei erfolgreich hochgeladen ({uploaded_files_count + 1} / {len(missing_files_list)}): {file}")
-
                 uploaded_files_count += 1
             else:
                 print(f"Fehler beim Hochladen der Datei {file}: HTTP-Statuscode {response.status_code}")
@@ -331,11 +329,6 @@ def upload_missing_files(server_url, username, password, local_directory_path, m
     print("---UPLOAD REPORT---")
     print(f"Upload abgeschlossen. {uploaded_files_count} von {len(missing_files_list)} Dateien wurden erfolgreich hochgeladen.")
 
-    
-    
-    
-    
-
 #------------------------------------------------------------------------------
 #                               Hauptprogramm
 #------------------------------------------------------------------------------
@@ -343,32 +336,24 @@ def upload_missing_files(server_url, username, password, local_directory_path, m
 read_config()
 
 is_connected = connect_to_nextcloud(server_url, username, password)
-    
-remote_directory_list = list_files_in_remote_directory(server_url, username, password, remote_directory_path)
 
-local_directory_list = list_files_in_local_directory(local_directory_path)
+for local_path, remote_path in directory_pairs:
+    print(f"\n=== Starte Abgleich ===")
+    print(f"🗂️  Lokal:  {local_path}")
+    print(f"🌐 Remote: {remote_path}")
 
-missing_folders_list, missing_files_list  = compare_remote_and_local_directories(local_directory_list, remote_directory_list)
+    remote_list = list_files_in_remote_directory(server_url, username, password, remote_path)
+    local_list = list_files_in_local_directory(local_path)
 
+    missing_folders, missing_files = compare_remote_and_local_directories(local_list, remote_list)
 
-print("---LOCAL LIST---")
-print(local_directory_list)
-print("")
-print("---REMOTE LIST---")
-print(remote_directory_list)
-print("")
-print("---MISSING FOLDERS LIST---")
-print(missing_folders_list)
-print("")
-print("---MISSING FILES LIST---")
-print(missing_files_list)
-print("")
-print("")
-print("---CREATE FOLDER PHASE---")
-create_missing_folders(server_url, username, password, missing_folders_list)
-print("")
-print("")
-print("---FILE UPLOAD PHASE---")
-upload_missing_files(server_url, username, password, local_directory_path, missing_files_list)
+    print("--- MISSING FOLDERS ---")
+    print(missing_folders)
+    print("--- MISSING FILES ---")
+    print(missing_files)
 
+    print("--- ERSTELLE VERZEICHNISSE ---")
+    create_missing_folders(server_url, username, password, remote_path, missing_folders)
 
+    print("--- LADE DATEIEN HOCH ---")
+    upload_missing_files(server_url, username, password, local_path, remote_path, missing_files)
